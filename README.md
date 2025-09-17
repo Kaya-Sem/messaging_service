@@ -36,8 +36,7 @@ ScyllaDB
 
 ###### Message Broker
 
-The gateway publishes messages into the broker, which will be
-Apache Kafka.
+NATS!
 
 ###### Gateways
 

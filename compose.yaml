@@ -1,0 +1,9 @@
+services:
+
+  nats:
+    image: nats:2.10
+    container_name: nats
+    ports:
+      - "4222:4222"   # NATS client connections
+      - "8222:8222"   # NATS monitoring endpoint
+      - "6222:6222"   # NATS cluster port (optional)
