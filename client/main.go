@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -20,7 +21,7 @@ type winsize struct {
 	Ypixel uint16
 }
 
-func getWidth() uint {
+func getDimensions() (uint, uint) {
 	ws := &winsize{}
 	retCode, _, errno := syscall.Syscall(syscall.SYS_IOCTL,
 		uintptr(syscall.Stdin),
@@ -30,7 +31,7 @@ func getWidth() uint {
 	if int(retCode) == -1 {
 		panic(errno)
 	}
-	return uint(ws.Col)
+	return uint(ws.Col), uint(ws.Row)
 }
 
 type termios struct {
@@ -84,16 +85,8 @@ func disableRawMode(oldState *termios) error {
 	return nil
 }
 
-// readInput reads a keypress in raw mode
 func readInput() ([]byte, int) {
 	buf := make([]byte, 3)
-	oldState, err := enableRawMode()
-	if err != nil {
-		fmt.Printf("Failed to enable raw mode: %v\n", err)
-		return buf, -1
-	}
-	defer disableRawMode(oldState)
-
 	n, err := os.Stdin.Read(buf[:])
 	if err != nil {
 		fmt.Printf("Error reading key: %v\n", err)
@@ -102,38 +95,78 @@ func readInput() ([]byte, int) {
 	return buf, n
 }
 
-func main() {
-	fmt.Println("Press any key (Ctrl+C to exit):")
+func getFilledChatWindow(_ []string, rows, columns int) [][]string {
+	grid := make([][]string, rows)
+	for i := range grid {
+		grid[i] = make([]string, columns)
+	}
 
+	for i := range columns {
+		grid[rows-1][i] = "━"
+	}
+
+	return grid
+}
+
+func gridToString(grid [][]string) string {
+	var sb strings.Builder
+
+	rows := len(grid)
+	cols := len(grid[0])
+
+	for r := range rows {
+		for c := range cols {
+			cell := grid[r][c]
+			if cell == "" {
+				sb.WriteString(" ")
+			} else {
+				sb.WriteString(cell)
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+func main() {
 	fmt.Printf("%s", RESET)
+
+	// Enable raw mode once at the start
+	oldState, err := enableRawMode()
+	if err != nil {
+		fmt.Printf("Failed to enable raw mode: %v\n", err)
+		return
+	}
+	defer disableRawMode(oldState) // Ensure terminal is restored on exit
+
+	// Set up signal handler to restore terminal on interrupt
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		<-c
+		disableRawMode(oldState)
+		fmt.Print(RESET)
+		os.Exit(0)
+	}()
 
 	for {
 		buf, n := readInput()
 
-		fmt.Printf("%s", RESET)
 		if n > 0 {
-			width := getWidth()
-			fmt.Printf("%s", "┏")
-			fmt.Printf("%s", strings.Repeat("━", int(width-2)))
-			fmt.Printf("%s", "┓")
 
-			fmt.Printf("Captured: %v (bytes: %v)", string(buf[:n]), buf[:n])
+			fmt.Printf("%s", RESET)
+			cols, rows := getDimensions()
 
-			// Example: detect Escape key (27)
-			if buf[0] == 27 {
-				if n == 1 {
-					fmt.Println("ESC key pressed")
-				} else {
-					// Special keys like arrows produce escape sequences
-					fmt.Println("Special key sequence")
-				}
-			}
+			grid := getFilledChatWindow(make([]string, 0), int(rows), int(cols))
+			screen := gridToString(grid)
+			fmt.Print(screen)
 
-			// Example: detect Ctrl+D (4)
-			if buf[0] == 4 {
-				fmt.Println("Ctrl+D pressed, exiting...")
-				return
-			}
+		}
+
+		if buf[0] == 4 {
+			fmt.Println("Ctrl+D pressed, exiting...")
+			return
 		}
 	}
 }
